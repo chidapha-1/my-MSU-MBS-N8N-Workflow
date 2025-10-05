@@ -1,0 +1,199 @@
+{
+  "name": "แจ้งเตือนวันหมดอายุ",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -752,
+        16
+      ],
+      "id": "9b32e99e-96f0-4bfc-b103-0c5d6465b80c",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "105kVIoUisl4dT-_uo_jM8fSUzGFfAriwpQw7VMZwmvk",
+          "mode": "list",
+          "cachedResultName": "รายการสินค้า",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/105kVIoUisl4dT-_uo_jM8fSUzGFfAriwpQw7VMZwmvk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "ชีต1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/105kVIoUisl4dT-_uo_jM8fSUzGFfAriwpQw7VMZwmvk/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -560,
+        16
+      ],
+      "id": "0e6f46a6-d7d0-4d33-a1c2-53c9341a98f0",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "LzKeIOzNAtucQvMi",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ค่าคงที่สำหรับจำนวนมิลลิวินาทีในหนึ่งวัน ใช้ในการคำนวณวันที่เหลือ\nconst MS_PER_DAY = 24 * 60 * 60 * 1000;\n\n// อาร์เรย์สำหรับเก็บผลลัพธ์ที่จะส่งออก\nconst out = [];\n\n// ฟังก์ชันช่วย parse วันที่จาก string (handle DD/MM/YYYY, MM/DD/YYYY, หรือ ISO)\n// ฟังก์ชันนี้จะพยายามแปลง string วันที่ให้เป็น Date object ที่ถูกต้อง\nfunction parseDate(dateStr) {\n  if (!dateStr) return null; // ถ้าไม่มีวันที่ คืน null\n\n  // ลอง parse แบบ ISO หรือ standard ก่อน\n  let date = new Date(dateStr);\n  if (!isNaN(date.getTime())) return date; // ถ้าสำเร็จ คืน date\n\n  // ถ้า fail ลอง parse แบบ DD/MM/YYYY (เช่น \"16/09/2025\")\n  const parts = dateStr.split('/'); // แยก string ด้วย /\n  if (parts.length === 3) {\n    // assume DD/MM/YYYY\n    date = new Date(parts[2], parts[1] - 1, parts[0]); // สร้าง Date จาก ปี, เดือน-1, วัน\n    if (!isNaN(date.getTime())) return date; // ถ้าสำเร็จ คืน date\n\n    // ถ้ายัง fail ลอง assume MM/DD/YYYY\n    date = new Date(parts[2], parts[0] - 1, parts[1]); // สร้าง Date จาก ปี, เดือน-1, วัน\n    if (!isNaN(date.getTime())) return date; // ถ้าสำเร็จ คืน date\n  }\n\n  // ถ้าทุกอย่าง fail คืน null\n  return null;\n}\n\n// สร้างวันที่ปัจจุบันและตั้งเวลาเป็น 00:00:00 เพื่อเปรียบเทียบวันที่ล้วนๆ\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\n\n// ลูปผ่านแต่ละ item ใน input (ข้อมูลจาก Google Sheet)\nfor (let i = 0; i < items.length; i++) {\n  const row = items[i].json; // ดึง json ของแถวปัจจุบัน\n\n  // ดึงค่าจาก row\n  const name = row[\"Product Name\"]; // ชื่อสินค้า\n  const barcode = row[\"Barcode\"]; // บาร์โค้ด\n  const expiryRaw = row[\"Expire date\"]; // วันที่หมดอายุดิบ (string)\n  const qty = row[\"Quantity\"]; // จำนวนคงเหลือ\n\n  // ตัวแปรเริ่มต้นสำหรับวันที่เหลือและ ISO date\n  let daysUntil = null;\n  let expiryISO = null;\n  let status = \"ปกติ\";  // ค่า default ถ้าไม่มีวันที่หมดอายุ\n\n  // ถ้ามี expiryRaw\n  if (expiryRaw) {\n    const expiryDate = parseDate(expiryRaw); // พยายาม parse วันที่\n    if (expiryDate) { // ถ้า parse สำเร็จ\n      expiryDate.setHours(0, 0, 0, 0); // ตั้งเวลาเป็น 00:00:00\n      daysUntil = Math.round((expiryDate - today) / MS_PER_DAY); // คำนวณจำนวนวันที่เหลือ\n      expiryISO = expiryDate.toISOString().slice(0, 10); // แปลงเป็นรูปแบบ YYYY-MM-DD\n\n      // กำหนด status ตามเงื่อนไข\n      if (daysUntil <= 0) {\n        status = \"หมดอายุแล้ว\"; // ถ้าหมดอายุแล้ว\n      } else if (daysUntil > 0 && daysUntil <= 7) {\n        status = \"ใกล้หมดอายุ (เหลือ \" + daysUntil + \" วัน)\"; // ถ้าใกล้หมดภายใน 7 วัน\n      }\n    }\n  }\n\n  // กำหนดค่า boolean สำหรับแจ้งเตือน\n  const notifyExpired = (daysUntil !== null && daysUntil <= 0); // true ถ้าหมดอายุ\n  const notifySoon = (daysUntil !== null && daysUntil > 0 && daysUntil <= 7); // true ถ้าใกล้หมด\n  const notifyPromo = notifySoon;  // กำหนดให้ notifyPromo เป็น true เมื่อใกล้หมดอายุ (เพื่อแนะนำโปรโมชั่น)\n\n  // เพิ่ม object json ลงใน out\n  out.push({\n    json: {\n      name,\n      barcode,\n      qty,\n      expiryRaw,\n      expiryISO,\n      daysUntilExpiry: daysUntil,\n      notifyExpired,\n      notifySoon,\n      status,\n      notifyPromo  // เพิ่มฟิลด์นี้สำหรับใช้ใน template\n    }\n  });\n}\n\n// ส่งออก array ของ results\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        16
+      ],
+      "id": "46430a07-5203-452e-8109-f6f6e3b2bb0f",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ebdcc0ee-61bb-4740-8b7e-d41c19f87cc6",
+              "leftValue": "={{$json[\"notifyExpired\"]}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "a19268d5-0e7e-4a61-83fa-6992b4d5943c",
+              "leftValue": "={{$json[\"notifySoon\"]}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -160,
+        16
+      ],
+      "id": "edcf8b2f-7faa-4ae3-a0fc-ebeb856ea41b",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "chatId": "=7888357754",
+        "text": "=📢 *แจ้งเตือนสินค้าใกล้หมดอายุ* ⚠️\n\n📦 ชื่อสินค้า: {{ $json[\"name\"] }}\n🏷️ บาร์โค้ด: {{ $json[\"barcode\"] }}\n📊 จำนวนคงเหลือ: {{ $json[\"qty\"] }}\n🗓️ วันหมดอายุ: {{ $json[\"expiryISO\"] }}\n📍 สถานะ: {{ $json[\"status\"] }}\n\n{{ $json[\"notifyPromo\"] ? \"💡 👉 แนะนำให้รีบจัดโปรโมชั่นเพื่อระบายของก่อนหมดอายุ!\" : \"\" }}",
+        "replyMarkup": "=none",
+        "forceReply": {},
+        "replyKeyboardOptions": {},
+        "replyKeyboardRemove": {},
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        64,
+        0
+      ],
+      "id": "260ae4fb-45e0-446b-a18b-6ee87852b110",
+      "name": "Send a text message",
+      "webhookId": "8a8724d6-2e65-4138-aaa2-442a55f9acc5",
+      "credentials": {
+        "telegramApi": {
+          "id": "DtCqYaQ2D6YGLxq1",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "001d3b25-89ec-4fdc-9738-aec88db6cd2d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7ebc23a0678e44e0118feea99fbe51a6636ce9a92dc9c6157a214af0bde6017d"
+  },
+  "id": "V88TrJfk2HCAWAPn",
+  "tags": []
+}
